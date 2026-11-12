@@ -137,6 +137,30 @@ public class AudioRecorder {
     });
   }
 
+  public void pauseRecording() {
+    Log.i(TAG, "pauseRecording()");
+
+    executor.execute(() -> {
+      if (recorder == null) {
+        Log.w(TAG, "No active recording to pause.");
+        return;
+      }
+      recorder.pause();
+    });
+  }
+
+  public void resumeRecording() {
+    Log.i(TAG, "resumeRecording()");
+
+    executor.execute(() -> {
+      if (recorder == null) {
+        Log.w(TAG, "No active recording to resume.");
+        return;
+      }
+      recorder.resume();
+    });
+  }
+
   public void stopRecording() {
     Log.i(TAG, "stopRecording()");
 

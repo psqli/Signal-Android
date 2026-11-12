@@ -10,4 +10,15 @@ import java.io.IOException;
 public interface Recorder {
   void start(ParcelFileDescriptor fileDescriptor) throws IOException;
   void stop();
+
+  /**
+   * Temporarily stops capturing audio without finalizing the output. Audio captured after
+   * {@link #resume()} is appended to the same stream.
+   */
+  void pause();
+
+  /**
+   * Resumes capturing audio after a call to {@link #pause()}.
+   */
+  void resume();
 }

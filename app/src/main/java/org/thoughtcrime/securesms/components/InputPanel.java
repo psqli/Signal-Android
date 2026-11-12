@@ -102,6 +102,8 @@ public class InputPanel extends ConstraintLayout
   private View                  recordingContainer;
   private final int[]           recordingContainerLocation = new int[2];
   private View                  recordLockCancel;
+  private ImageView             recordPauseResume;
+  private boolean               recordingPaused;
   private View                  composeContainer;
   private View                  editMessageCancel;
   private ImageView             editMessageThumbnail;
@@ -170,6 +172,7 @@ public class InputPanel extends ConstraintLayout
     this.sendButton             = findViewById(R.id.send_button);
     this.recordingContainer     = findViewById(R.id.recording_container);
     this.recordLockCancel       = findViewById(R.id.record_cancel);
+    this.recordPauseResume      = findViewById(R.id.record_pause_resume);
     this.voiceNoteDraftViewStub = new Stub<>(findViewById(R.id.voice_note_draft_view_stub));
     this.slideToCancel          = new SlideToCancel(findViewById(R.id.slide_to_cancel));
     this.microphoneRecorderView = findViewById(R.id.recorder_view);
@@ -183,6 +186,7 @@ public class InputPanel extends ConstraintLayout
     this.editMessageThumbnail   = findViewById(R.id.edit_message_thumbnail);
 
     this.recordLockCancel.setOnClickListener(v -> microphoneRecorderView.cancelAction(true));
+    this.recordPauseResume.setOnClickListener(v -> toggleRecordingPaused());
 
     mediaKeyboard.setVisibility(View.VISIBLE);
     emojiVisible = true;
@@ -778,6 +782,8 @@ public class InputPanel extends ConstraintLayout
   public void onRecordLocked() {
     slideToCancel.hide();
     recordLockCancel.setVisibility(View.VISIBLE);
+    setRecordingPaused(false);
+    recordPauseResume.setVisibility(View.VISIBLE);
     fadeIn(buttonToggle);
     if (listener != null) listener.onRecorderLocked();
   }
@@ -808,8 +814,37 @@ public class InputPanel extends ConstraintLayout
     quickCameraToggle.setEnabled(enabled);
   }
 
+  private void toggleRecordingPaused() {
+    if (!microphoneRecorderView.isRecordingLocked()) {
+      return;
+    }
+
+    boolean pause = !recordingPaused;
+    setRecordingPaused(pause);
+
+    if (pause) {
+      recordTime.pause();
+      if (listener != null) listener.onRecorderPaused();
+    } else {
+      recordTime.resume();
+      if (listener != null) listener.onRecorderResumed();
+    }
+  }
+
+  private void setRecordingPaused(boolean paused) {
+    recordingPaused = paused;
+    recordPauseResume.setImageResource(paused ? R.drawable.symbol_play_24 : R.drawable.symbol_pause_24);
+    recordPauseResume.setContentDescription(getContext().getString(paused ? R.string.InputPanel__resume_recording : R.string.InputPanel__pause_recording));
+  }
+
+  public boolean isRecordingPaused() {
+    return recordingPaused;
+  }
+
   private long onRecordHideEvent() {
     recordLockCancel.setVisibility(View.GONE);
+    recordPauseResume.setVisibility(View.GONE);
+    setRecordingPaused(false);
 
     ListenableFuture<Void> future      = slideToCancel.hide();
     long                   elapsedTime = recordTime.hide();
@@ -976,6 +1011,8 @@ public class InputPanel extends ConstraintLayout
   public interface Listener extends VoiceNoteDraftView.Listener {
     void onRecorderStarted();
     void onRecorderLocked();
+    void onRecorderPaused();
+    void onRecorderResumed();
     void onRecorderSaveDraft();
     void onRecorderFinished();
     void onRecorderCanceled(boolean byUser);
@@ -1045,7 +1082,10 @@ public class InputPanel extends ConstraintLayout
     private final @NonNull View     microphone;
     private final @NonNull Runnable onLimitHit;
     private final          long     limitSeconds;
-    private                long     startTime;
+    private                boolean  active;
+    private                boolean  paused;
+    private                long     segmentStartTime;
+    private                long     accumulatedTime;
 
     private RecordTime(@NonNull TextView recordTimeView, @NonNull View microphone, long limitSeconds, @NonNull Runnable onLimitHit) {
       this.recordTimeView = recordTimeView;
@@ -1056,36 +1096,73 @@ public class InputPanel extends ConstraintLayout
 
     @MainThread
     public void display() {
-      this.startTime = System.currentTimeMillis();
+      this.active           = true;
+      this.paused           = false;
+      this.accumulatedTime  = 0;
+      this.segmentStartTime = System.currentTimeMillis();
       this.recordTimeView.setText(DateUtils.formatElapsedTime(0));
       ViewUtil.fadeIn(this.recordTimeView, FADE_TIME);
+      ThreadUtil.cancelRunnableOnMain(this);
       ThreadUtil.runOnMainDelayed(this, TimeUnit.SECONDS.toMillis(1));
       microphone.setVisibility(View.VISIBLE);
       microphone.startAnimation(pulseAnimation());
     }
 
     @MainThread
+    public void pause() {
+      if (!active || paused) return;
+
+      accumulatedTime += System.currentTimeMillis() - segmentStartTime;
+      paused           = true;
+      ThreadUtil.cancelRunnableOnMain(this);
+      recordTimeView.setText(DateUtils.formatElapsedTime(TimeUnit.MILLISECONDS.toSeconds(accumulatedTime)));
+      microphone.clearAnimation();
+      microphone.setAlpha(0.4f);
+    }
+
+    @MainThread
+    public void resume() {
+      if (!active || !paused) return;
+
+      paused           = false;
+      segmentStartTime = System.currentTimeMillis();
+      ThreadUtil.cancelRunnableOnMain(this);
+      ThreadUtil.runOnMainDelayed(this, 1000 - (accumulatedTime % 1000));
+      microphone.setAlpha(1f);
+      microphone.startAnimation(pulseAnimation());
+    }
+
+    @MainThread
     public long hide() {
-      long elapsedTime = System.currentTimeMillis() - startTime;
-      this.startTime = 0;
+      long elapsedTime = getElapsedTime();
+      this.active           = false;
+      this.paused           = false;
+      this.accumulatedTime  = 0;
+      this.segmentStartTime = 0;
+      ThreadUtil.cancelRunnableOnMain(this);
       ViewUtil.fadeOut(this.recordTimeView, FADE_TIME, View.INVISIBLE);
       microphone.clearAnimation();
+      microphone.setAlpha(1f);
       ViewUtil.fadeOut(this.microphone, FADE_TIME, View.INVISIBLE);
       return elapsedTime;
+    }
+
+    private long getElapsedTime() {
+      if (!active) return 0;
+      return paused ? accumulatedTime : accumulatedTime + (System.currentTimeMillis() - segmentStartTime);
     }
 
     @Override
     @MainThread
     public void run() {
-      long localStartTime = startTime;
-      if (localStartTime > 0) {
-        long elapsedTime = System.currentTimeMillis() - localStartTime;
+      if (active && !paused) {
+        long elapsedTime    = getElapsedTime();
         long elapsedSeconds = TimeUnit.MILLISECONDS.toSeconds(elapsedTime);
         if (elapsedSeconds >= limitSeconds) {
           onLimitHit.run();
         } else {
           recordTimeView.setText(DateUtils.formatElapsedTime(elapsedSeconds));
-          ThreadUtil.runOnMainDelayed(this, TimeUnit.SECONDS.toMillis(1));
+          ThreadUtil.runOnMainDelayed(this, 1000 - (elapsedTime % 1000));
         }
       }
     }

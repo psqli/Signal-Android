@@ -5607,6 +5607,14 @@ class ConversationFragment :
       voiceMessageRecordingDelegate.onRecorderLocked()
     }
 
+    override fun onRecorderPaused() {
+      voiceMessageRecordingDelegate.onRecorderPaused()
+    }
+
+    override fun onRecorderResumed() {
+      voiceMessageRecordingDelegate.onRecorderResumed()
+    }
+
     override fun onRecorderFinished() {
       updateToggleButtonState()
       voiceMessageRecordingDelegate.onRecorderFinished()

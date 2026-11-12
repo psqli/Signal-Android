@@ -59,6 +59,18 @@ class VoiceMessageRecordingDelegate(
     fragment.requireActivity().requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
   }
 
+  fun onRecorderPaused() {
+    if (session == null) return
+    vibrate(20)
+    audioRecorder.pauseRecording()
+  }
+
+  fun onRecorderResumed() {
+    if (session == null) return
+    vibrate(20)
+    audioRecorder.resumeRecording()
+  }
+
   fun onRecorderFinished() {
     voiceRecorderWakeLock.release()
     vibrateAndResetOrientation(20)
@@ -80,6 +92,11 @@ class VoiceMessageRecordingDelegate(
     voiceRecorderWakeLock.release()
     vibrateAndResetOrientation(50)
     session?.saveDraft()
+  }
+
+  @Suppress("DEPRECATION")
+  private fun vibrate(milliseconds: Long) {
+    fragment.activity?.let { ServiceUtil.getVibrator(it).vibrate(milliseconds) }
   }
 
   @Suppress("DEPRECATION")

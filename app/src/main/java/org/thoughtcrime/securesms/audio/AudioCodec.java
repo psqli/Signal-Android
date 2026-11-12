@@ -32,6 +32,7 @@ public class AudioCodec implements Recorder {
   private final AudioRecord audioRecord;
 
   private boolean running  = true;
+  private boolean paused   = false;
   private boolean failed   = false;
   private boolean finished = false;
 
@@ -60,7 +61,19 @@ public class AudioCodec implements Recorder {
   @Override
   public synchronized void stop() {
     running = false;
+    notifyAll();
     while (!finished) Util.wait(this, 0);
+  }
+
+  @Override
+  public synchronized void pause() {
+    paused = true;
+  }
+
+  @Override
+  public synchronized void resume() {
+    paused = false;
+    notifyAll();
   }
 
   private void start(final OutputStream outputStream) {
@@ -75,6 +88,20 @@ public class AudioCodec implements Recorder {
 
         try {
           while (true) {
+            if (isPaused()) {
+              // Stop pulling from the mic while paused. The ADTS stream carries no timestamps,
+              // so frames produced after resume simply follow the ones produced before the pause.
+              try {
+                audioRecord.stop();
+              } catch (IllegalStateException ise) {
+                Log.w(TAG, "audioRecord stop on pause failed.", ise);
+              }
+
+              if (waitWhilePaused()) {
+                audioRecord.startRecording();
+              }
+            }
+
             boolean running = isRunning();
 
             handleCodecInput(audioRecord, audioRecordData, mediaCodec, codecInputBuffers, running);
@@ -117,6 +144,18 @@ public class AudioCodec implements Recorder {
     return running;
   }
 
+  private synchronized boolean isPaused() {
+    return paused && running;
+  }
+
+  /**
+   * Blocks while paused. Returns true if recording should continue, false if it was stopped while paused.
+   */
+  private synchronized boolean waitWhilePaused() {
+    while (paused && running) Util.wait(this, 0);
+    return running;
+  }
+
   private synchronized void setFinished() {
     finished = true;
     notifyAll();
@@ -126,7 +165,7 @@ public class AudioCodec implements Recorder {
                                 MediaCodec mediaCodec, ByteBuffer[] codecInputBuffers,
                                 boolean running)
   {
-    int length                = audioRecord.read(audioRecordData, 0, audioRecordData.length);
+    int length                = Math.max(0, audioRecord.read(audioRecordData, 0, audioRecordData.length));
     int codecInputBufferIndex = mediaCodec.dequeueInputBuffer(10 * 1000);
 
     if (codecInputBufferIndex >= 0) {

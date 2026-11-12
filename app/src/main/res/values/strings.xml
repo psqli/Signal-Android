@@ -1502,6 +1502,10 @@
     <string name="InputPanel__this_action_cant_be_undone">This action can\'t be undone.</string>
     <!-- Button inside an alert dialog confirming the deletion of their draft -->
     <string name="InputPanel__discard">Discard</string>
+    <!-- Content description for the button that pauses an in-progress, locked voice message recording -->
+    <string name="InputPanel__pause_recording">Pause recording</string>
+    <!-- Content description for the button that resumes a paused voice message recording -->
+    <string name="InputPanel__resume_recording">Resume recording</string>
 
     <!-- LongMessageActivity -->
     <string name="LongMessageActivity_unable_to_find_message">Unable to find message</string>
