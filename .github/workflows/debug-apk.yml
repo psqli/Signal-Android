@@ -1,0 +1,88 @@
+name: Debug APK
+
+# Builds a playProd debug APK on a standard GitHub-hosted runner and uploads it
+# as a workflow artifact for manual testing.
+#
+# Signing: by default the APK is signed with the runner's throwaway debug key,
+# which changes on every run, so installing a newer build means uninstalling
+# the previous one first. To keep a stable key, add a repository secret
+# DEBUG_KEYSTORE_BASE64 holding a base64-encoded keystore created with:
+#   keytool -genkeypair -keystore debug.keystore -alias androiddebugkey \
+#     -storepass android -keypass android -keyalg RSA -keysize 2048 \
+#     -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+#   base64 -w0 debug.keystore
+
+on:
+  push:
+    branches:
+    - 'voice-note-pause-resume-ci'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+    - name: Free up disk space
+      run: |
+        # Keep /usr/local/lib/android: the build uses the runner's Android SDK.
+        sudo rm -rf /usr/share/dotnet /usr/share/swift /usr/local/.ghcup /usr/local/julia* \
+          /usr/local/share/chromium /usr/local/share/powershell /opt/microsoft /opt/google /opt/az
+        docker system prune -af || true
+        df -h /
+
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: set up JDK 21
+      uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+      with:
+        distribution: temurin
+        java-version: 21
+
+    - name: Validate Gradle Wrapper
+      uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
+
+    - name: Use stable debug keystore (optional)
+      env:
+        DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+      run: |
+        if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
+          echo "No DEBUG_KEYSTORE_BASE64 secret; using the runner's throwaway debug key."
+          exit 0
+        fi
+        echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ci-debug.keystore
+        printf '%s\n' \
+          'storeFile=ci-debug.keystore' \
+          'storePassword=android' \
+          'keyAlias=androiddebugkey' \
+          'keyPassword=android' > keystore.debug.properties
+
+    # gradle.properties asks for a 12 GB heap, sized for Signal's 8-core runners.
+    # A standard runner has 16 GB of RAM, so compile Kotlin in-process with a
+    # smaller heap and fewer parallel workers.
+    - name: Build playProd debug APK
+      run: >
+        ./gradlew --no-daemon --max-workers=2
+        -Dorg.gradle.jvmargs="-Xmx7g -XX:MaxMetaspaceSize=1g"
+        -Dkotlin.compiler.execution.strategy=in-process
+        :app:assemblePlayProdDebug
+
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      with:
+        name: signal-playProd-debug-${{ github.sha }}
+        path: |
+          app/build/outputs/apk/playProd/debug/*-arm64-v8a-*.apk
+          app/build/outputs/apk/playProd/debug/*-universal-*.apk
+        if-no-files-found: error
+        retention-days: 14
