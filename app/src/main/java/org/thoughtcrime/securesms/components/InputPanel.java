@@ -833,7 +833,7 @@ public class InputPanel extends ConstraintLayout
 
   private void setRecordingPaused(boolean paused) {
     recordingPaused = paused;
-    recordPauseResume.setImageResource(paused ? R.drawable.symbol_play_24 : R.drawable.symbol_pause_24);
+    recordPauseResume.setImageResource(paused ? org.signal.core.ui.R.drawable.symbol_play_24 : org.signal.core.ui.R.drawable.symbol_pause_24);
     recordPauseResume.setContentDescription(getContext().getString(paused ? R.string.InputPanel__resume_recording : R.string.InputPanel__pause_recording));
   }
 
